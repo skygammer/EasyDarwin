@@ -1,7 +1,6 @@
 package routers
 
 import (
-	"bytes"
 	"log"
 	"math"
 	"os"
@@ -96,15 +95,19 @@ func (h *APIHandler) RecordFolders(c *gin.Context) {
  * @apiSuccess (200) {String} rows.path 录像文件的相对路径,录像文件为m3u8格式，将其放到video标签中便可直接播放。其绝对路径为：http[s]://host:port/record/[path]。
  */
 func (h *APIHandler) RecordFiles(c *gin.Context) {
+	
 	type Form struct {
 		utils.PageForm
 		Folder  string `form:"folder" binding:"required"`
 		StartAt int    `form:"beginUTCSecond"`
 		StopAt  int    `form:"endUTCSecond"`
 	}
+	
 	var form = Form{}
 	form.Limit = math.MaxUint32
+	
 	err := c.Bind(&form)
+	
 	if err != nil {
 		log.Printf("record file bind err:%v", err)
 		return
@@ -113,47 +116,56 @@ func (h *APIHandler) RecordFiles(c *gin.Context) {
 	files := make([]interface{}, 0)
 	mp4Path := utils.Conf().Section("rtsp").Key("m3u8_dir_path").MustString("")
 	if mp4Path != "" {
+		
 		ffmpeg_path := utils.Conf().Section("rtsp").Key("ffmpeg_path").MustString("")
+		
 		ffmpeg_folder, executable := filepath.Split(ffmpeg_path)
+		
 		split := strings.Split(executable, ".")
+		
 		suffix := ""
+		
 		if len(split) > 1 {
 			suffix = split[1]
 		}
+		
 		ffprobe := ffmpeg_folder + "ffprobe" + suffix
+
 		folder := filepath.Join(mp4Path, form.Folder)
+
 		visit := func(files *[]interface{}) filepath.WalkFunc {
+			
 			return func(path string, info os.FileInfo, err error) error {
+				
 				if err != nil {
 					return err
 				}
+				
 				if path == folder {
 					return nil
 				}
+				
 				if info.IsDir() {
 					return nil
 				}
+				
 				if info.Size() == 0 {
 					return nil
 				}
+				
 				if info.Name() == ".DS_Store" {
 					return nil
 				}
+				
 				if !strings.HasSuffix(strings.ToLower(info.Name()), ".m3u8") && !strings.HasSuffix(strings.ToLower(info.Name()), ".ts") {
 					return nil
 				}
-				cmd := exec.Command(ffprobe, "-i", path)
-				cmdOutput := &bytes.Buffer{}
-				//cmd.Stdout = cmdOutput
-				cmd.Stderr = cmdOutput
-				err = cmd.Run()
-				bytes := cmdOutput.Bytes()
-				output := string(bytes)
-				//log.Printf("%v result:%v", cmd, output)
-				var average = regexp.MustCompile(`Duration: ((\d+):(\d+):(\d+).(\d+))`)
-				result := average.FindStringSubmatch(output)
+				
+				commandOutput, _:=exec.Command(ffprobe, "-i", path).CombinedOutput()
+				result := regexp.MustCompile(`Duration: ((\d+):(\d+):(\d+).(\d+))`).FindStringSubmatch( string( commandOutput ) )
 				duration := time.Duration(0)
 				durationStr := ""
+
 				if len(result) > 0 {
 					durationStr = result[1]
 					h, _ := strconv.Atoi(result[2])
@@ -170,13 +182,17 @@ func (h *APIHandler) RecordFiles(c *gin.Context) {
 					"path":           path[len(mp4Path):],
 					"durationMillis": duration / time.Millisecond,
 					"duration":       durationStr})
+
 				return nil
 			}
 		}
+
 		err = filepath.Walk(folder, visit(&files))
+		
 		if err != nil {
 			log.Printf("Query RecordFolders err:%v", err)
 		}
+
 	}
 
 	pr := utils.NewPageResult(files)
